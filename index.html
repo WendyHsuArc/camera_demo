@@ -4,106 +4,263 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0b1020" />
-  <title>一鍵開啟相機｜Demo</title>
+  <title>相機 + QR Code 掃描（可記錄）</title>
   <style>
     :root{--bg:#0b1020;--card:#111831;--line:#203055;--fg:#e8eef9}
     html,body{height:100%}
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;display:flex;min-height:100dvh;margin:0;background:var(--bg);color:var(--fg)}
-    .wrap{margin:auto;max-width:640px;padding:24px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-    h1{margin:0 0 6px}
-    .hint{opacity:.85;font-size:14px}
-    .row{display:grid;gap:12px;margin-top:14px}
-    button{width:100%;font-size:18px;padding:14px;border-radius:12px;border:none;cursor:pointer}
-    .primary{background:#4f8cff;color:#03122e}
-    .muted{background:#17213d;color:#cfe0ff}
-    img,video{width:100%;max-height:60dvh;object-fit:contain;border-radius:12px;border:1px solid var(--line);background:#0a1226}
-    .badge{display:inline-block;padding:4px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;background:#0e1730;margin-left:8px}
-    .warn{background:#2a0f0f;border-color:#6b1f1f}
+    .wrap{margin:auto;max-width:900px;padding:20px}
+    .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    h1{margin:0 0 10px}
+    .row{display:flex;flex-wrap:wrap;gap:8px}
+    button,select{font-size:16px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#17213d;color:#cfe0ff;cursor:pointer}
+    button.primary{background:#4f8cff;color:#03122e;border:none}
+    button.warn{background:#7a1b1b}
+    input[type=file]{display:none}
+    video,canvas,img{width:100%;border-radius:12px;border:1px solid var(--line);background:#0a1226}
+    .hint{opacity:.85;font-size:13px}
+    .badge{display:inline-block;padding:2px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;background:#0e1730;margin-left:8px}
+    .log{max-height:50dvh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:8px;background:#0a1226}
+    .log table{width:100%;border-collapse:collapse}
+    .log th,.log td{border-bottom:1px solid #1b284a;padding:6px 8px;vertical-align:top;word-break:break-all;font-size:13px}
+    .ok{color:#7ce38b}
+    .err{color:#ff8f7a}
+    @media (max-width: 840px){.grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
-      <h1>一鍵開啟相機<span id="httpsBadge" class="badge" hidden>HTTPS</span></h1>
-      <p class="hint">這個版本適合部署到 <strong>GitHub Pages</strong>（靜態網站 + 預設 HTTPS）。請將檔名命名為 <code>index.html</code> 放在根目錄。</p>
+    <h1>相機 + QR Code 掃描 <span id="httpsBadge" class="badge" hidden>HTTPS</span></h1>
+    <p class="hint">支援兩種模式：<b>即時掃描</b>（開鏡頭掃描 QR/條碼）與 <b>從照片辨識</b>。所有掃描結果會暫存在本機瀏覽器（localStorage）。</p>
 
-      <!-- 方式 A：最相容（拍照或從相簿擇一） -->
-      <div class="row">
-        <button id="openCameraBtn" class="primary">拍照 / 選擇照片</button>
-        <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none" />
-        <img id="preview" alt="預覽會顯示在這裡" hidden />
+    <div class="grid">
+      <!-- 左側：相機與掃描 -->
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <button id="startBtn" class="primary">開始即時掃描</button>
+          <button id="stopBtn">停止</button>
+          <button id="torchBtn">手電筒</button>
+          <select id="cameraSel" title="選擇鏡頭"></select>
+          <button id="snapBtn">拍照</button>
+          <label for="fileInput" class="button-like">從照片辨識</label>
+          <input id="fileInput" type="file" accept="image/*" />
+        </div>
+
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="capture" hidden></canvas>
+        <img id="photo" alt="拍照預覽" hidden />
+        <p id="status" class="hint">尚未開始。</p>
       </div>
 
-      <hr style="margin:20px 0;border:0;border-top:1px solid var(--line)" />
-
-      <!-- 方式 B：直接開啟相機串流（需要 HTTPS 與瀏覽器授權） -->
-      <div class="row">
-        <button id="streamBtn" class="muted">用相機即時取景（可選）</button>
-        <video id="video" playsinline autoplay hidden></video>
-        <small id="httpsWarn" class="hint warn" style="padding:10px;border-radius:10px" hidden>
-          需在 <strong>HTTPS</strong> 網站上才能使用即時取景（GitHub Pages 會自動提供 HTTPS）。
-        </small>
+      <!-- 右側：紀錄 -->
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <button id="exportBtn" class="primary">匯出 CSV</button>
+          <button id="clearBtn" class="warn">清除紀錄</button>
+        </div>
+        <div class="log">
+          <table id="logTable">
+            <thead>
+              <tr><th style="width:120px">時間</th><th style="width:90px">格式</th><th>內容</th></tr>
+            </thead>
+            <tbody id="logBody"></tbody>
+          </table>
+        </div>
       </div>
-
-      <p class="hint" style="margin-top:16px">
-        小提醒：
-        <br>• 方式 A 最穩定，iOS Safari / Android Chrome 都能叫出相機或相簿。
-        <br>• 方式 B 需要 HTTPS 與權限授予，且某些裝置上可能仍顯示權限提示。
-      </p>
     </div>
+
+    <p class="hint" style="margin-top:12px">小提醒：需在 <b>HTTPS</b> 或 <code>localhost</code> 環境才能開鏡頭。GitHub Pages 會自帶 HTTPS。</p>
   </div>
 
+  <!-- 後備：若沒有 BarcodeDetector，使用 jsQR (只支援 QR；條碼可再接 ZXing) -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" integrity="sha256-fs8n8XU6s2w2oGzTM3tL8hA0y5pH8g2g6l4wQ1mGJ3M=" crossorigin="anonymous"></script>
+
   <script>
-    // --- 顯示是否在 HTTPS 環境 ---
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const torchBtn = document.getElementById('torchBtn');
+    const snapBtn  = document.getElementById('snapBtn');
+    const fileInput = document.getElementById('fileInput');
+    const cameraSel = document.getElementById('cameraSel');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('capture');
+    const ctx = canvas.getContext('2d');
+    const photo = document.getElementById('photo');
+    const logBody = document.getElementById('logBody');
+    const exportBtn = document.getElementById('exportBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    let stream; let anim; let usingTorch = false; let currentDeviceId = null;
+    let barcodeDetector = ('BarcodeDetector' in window) ? new BarcodeDetector({formats: ['qr_code','aztec','data_matrix','pdf417','codabar','code_39','code_93','code_128','ean_13','ean_8','itf','upc_a','upc_e']}) : null;
+
+    // HTTPS Badge
     (function(){
       const isHttps = location.protocol === 'https:' || location.hostname === 'localhost';
-      const httpsBadge = document.getElementById('httpsBadge');
-      const httpsWarn = document.getElementById('httpsWarn');
-      if (isHttps) {
-        httpsBadge.hidden = false;
-      } else {
-        httpsWarn.hidden = false;
-      }
+      document.getElementById('httpsBadge').hidden = !isHttps;
     })();
 
-    // --- 方式 A：透過 <input type="file"> 叫出相機 ---
-    const openBtn = document.getElementById('openCameraBtn');
-    const fileInput = document.getElementById('fileInput');
-    const previewImg = document.getElementById('preview');
+    // === 掃描迴圈 ===
+    async function tick(){
+      if(!video.videoWidth){ anim = requestAnimationFrame(tick); return; }
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
 
-    openBtn.addEventListener('click', () => fileInput.click());
-
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files && fileInput.files[0];
-      if (!file) return;
-      const url = URL.createObjectURL(file);
-      previewImg.src = url;
-      previewImg.hidden = false;
-    });
-
-    // --- 方式 B：navigator.mediaDevices.getUserMedia 開啟鏡頭串流 ---
-    const streamBtn = document.getElementById('streamBtn');
-    const video = document.getElementById('video');
-    let mediaStream;
-
-    streamBtn.addEventListener('click', async () => {
       try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
-          audio: false
-        });
-        video.srcObject = mediaStream;
-        video.hidden = false;
-      } catch (err) {
-        alert('無法開啟相機：' + (err && err.message ? err.message : err));
-      }
+        if(barcodeDetector){
+          const bitmap = await createImageBitmap(imageData);
+          const codes = await barcodeDetector.detect(bitmap);
+          if(codes && codes.length){
+            for(const c of codes){ onCode(c.rawValue || c, c.format || 'unknown'); }
+          }
+        } else if(window.jsQR){
+          const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+          if(qr && qr.data){ onCode(qr.data, 'qr_code'); }
+        }
+      } catch(err){ statusEl.textContent = '掃描錯誤：' + err.message; }
+
+      anim = requestAnimationFrame(tick);
+    }
+
+    // === 開始/停止 ===
+    async function start(deviceId){
+      stop();
+      try{
+        const constraints = {
+          video: {
+            facingMode: deviceId ? undefined : { ideal: 'environment' },
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            width: { ideal: 1280 }, height: { ideal: 720 }
+          }, audio: false
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream; await video.play();
+        statusEl.textContent = '掃描中…';
+        listCameras();
+        tick();
+      }catch(err){ statusEl.textContent = '無法開啟相機：' + err.message; }
+    }
+    function stop(){
+      if(anim) cancelAnimationFrame(anim); anim=null;
+      if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+      statusEl.textContent = '已停止。';
+    }
+
+    // === 手電筒 ===
+    async function toggleTorch(){
+      try{
+        const track = stream?.getVideoTracks?.()[0];
+        if(!track) return;
+        const caps = track.getCapabilities?.();
+        if(!caps || !caps.torch){ alert('此裝置/瀏覽器不支援手電筒'); return; }
+        usingTorch = !usingTorch;
+        await track.applyConstraints({ advanced: [{ torch: usingTorch }] });
+        torchBtn.textContent = usingTorch ? '關閉手電筒' : '手電筒';
+      }catch(e){ alert('切換手電筒失敗：' + e.message); }
+    }
+
+    // === 拍照 ===
+    function snap(){
+      if(!video.videoWidth) return;
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      photo.src = canvas.toDataURL('image/jpeg', 0.92);
+      photo.hidden = false;
+    }
+
+    // === 從圖片辨識 ===
+    fileInput.addEventListener('change', async ()=>{
+      const f = fileInput.files?.[0]; if(!f) return;
+      const img = new Image(); img.onload = async ()=>{
+        canvas.width = img.width; canvas.height = img.height;
+        ctx.drawImage(img,0,0);
+        const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+        try{
+          if(barcodeDetector){
+            const bitmap = await createImageBitmap(imageData);
+            const codes = await barcodeDetector.detect(bitmap);
+            if(codes.length){ for(const c of codes){ onCode(c.rawValue || c, c.format || 'unknown'); } }
+            else { statusEl.textContent = '圖片中未偵測到條碼/QR。'; }
+          } else if(window.jsQR){
+            const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+            if(qr && qr.data){ onCode(qr.data, 'qr_code'); }
+            else { statusEl.textContent = '圖片中未偵測到 QR Code。'; }
+          }
+        }catch(e){ statusEl.textContent = '辨識失敗：' + e.message; }
+      }; img.src = URL.createObjectURL(f);
     });
 
-    // 若離開頁面，關閉串流（省電）
-    window.addEventListener('pagehide', () => {
-      if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    // === 鏡頭列表 ===
+    async function listCameras(){
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const vids = devices.filter(d=>d.kind==='videoinput');
+      cameraSel.innerHTML = '';
+      vids.forEach((d,i)=>{
+        const opt = document.createElement('option');
+        opt.value = d.deviceId; opt.textContent = d.label || `鏡頭 ${i+1}`;
+        if(d.deviceId===currentDeviceId) opt.selected = true;
+        cameraSel.appendChild(opt);
+      });
+    }
+
+    cameraSel.addEventListener('change', async ()=>{
+      currentDeviceId = cameraSel.value; await start(currentDeviceId);
     });
+
+    // === 紀錄 ===
+    function loadLog(){
+      try{ return JSON.parse(localStorage.getItem('qrLog')||'[]'); }catch{ return []; }
+    }
+    function saveLog(arr){ localStorage.setItem('qrLog', JSON.stringify(arr)); }
+    function renderLog(){
+      const arr = loadLog(); logBody.innerHTML='';
+      for(const item of arr.slice().reverse()){
+        const tr = document.createElement('tr');
+        const t = new Date(item.ts).toLocaleString();
+        tr.innerHTML = `<td>${t}</td><td>${item.format}</td><td>${escapeHtml(item.text)}</td>`;
+        logBody.appendChild(tr);
+      }
+    }
+    function onCode(text, format){
+      statusEl.innerHTML = `<span class='ok'>成功</span>：${escapeHtml(text)}`;
+      const arr = loadLog();
+      // 去重（以內容與格式為 key）
+      const key = text + '|' + format;
+      if(!arr.some(x=>x.text+'|'+x.format===key)){
+        arr.push({ text, format, ts: Date.now() }); saveLog(arr); renderLog();
+      }
+    }
+    function escapeHtml(s){ return s.replace(/[&<>\"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+    // 匯出 CSV
+    function exportCSV(){
+      const arr = loadLog();
+      const header = ['time','format','text'];
+      const rows = arr.map(x=>[new Date(x.ts).toISOString(), x.format, x.text.replace(/"/g,'""')]);
+      const csv = [header, ...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('
+');
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'qr_log.csv'; a.click();
+    }
+
+    // 清除
+    function clearLog(){ localStorage.removeItem('qrLog'); renderLog(); }
+
+    // 綁定 UI 事件
+    startBtn.addEventListener('click', ()=> start());
+    stopBtn.addEventListener('click', stop);
+    torchBtn.addEventListener('click', toggleTorch);
+    snapBtn.addEventListener('click', snap);
+    exportBtn.addEventListener('click', exportCSV);
+    clearBtn.addEventListener('click', clearLog);
+
+    // 初始
+    renderLog();
+
+    // 從背景返回頁面時，確保釋放資源
+    window.addEventListener('pagehide', stop);
   </script>
 </body>
 </html>
