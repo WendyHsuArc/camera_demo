@@ -14,7 +14,7 @@
     .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
     h1{margin:0 0 10px}
     .row{display:flex;flex-wrap:wrap;gap:8px}
-    button,select{font-size:16px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#17213d;color:#cfe0ff;cursor:pointer}
+    button,select,label.button-like{font-size:16px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#17213d;color:#cfe0ff;cursor:pointer}
     button.primary{background:#4f8cff;color:#03122e;border:none}
     button.warn{background:#7a1b1b}
     input[type=file]{display:none}
@@ -32,7 +32,7 @@
 <body>
   <div class="wrap">
     <h1>相機 + QR Code 掃描 <span id="httpsBadge" class="badge" hidden>HTTPS</span></h1>
-    <p class="hint">支援兩種模式：<b>即時掃描</b>（開鏡頭掃描 QR/條碼）與 <b>從照片辨識</b>。所有掃描結果會暫存在本機瀏覽器（localStorage）。</p>
+    <p class="hint">支援：<b>即時掃描</b>、<b>從照片辨識</b>、<b>手電筒</b>、<b>鏡頭切換</b>、<b>結果紀錄/匯出</b>。結果存於本機瀏覽器（localStorage）。</p>
 
     <div class="grid">
       <!-- 左側：相機與掃描 -->
@@ -70,11 +70,11 @@
       </div>
     </div>
 
-    <p class="hint" style="margin-top:12px">小提醒：需在 <b>HTTPS</b> 或 <code>localhost</code> 環境才能開鏡頭。GitHub Pages 會自帶 HTTPS。</p>
+    <p class="hint" style="margin-top:12px">需在 <b>HTTPS</b> 或 <code>localhost</code> 環境才能開鏡頭。GitHub Pages 會自帶 HTTPS。</p>
   </div>
 
   <!-- 後備：若沒有 BarcodeDetector，使用 jsQR (只支援 QR；條碼可再接 ZXing) -->
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" integrity="sha256-fs8n8XU6s2w2oGzTM3tL8hA0y5pH8g2g6l4wQ1mGJ3M=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" crossorigin="anonymous"></script>
 
   <script>
     const statusEl = document.getElementById('status');
@@ -93,13 +93,24 @@
     const clearBtn = document.getElementById('clearBtn');
 
     let stream; let anim; let usingTorch = false; let currentDeviceId = null;
-    let barcodeDetector = ('BarcodeDetector' in window) ? new BarcodeDetector({formats: ['qr_code','aztec','data_matrix','pdf417','codabar','code_39','code_93','code_128','ean_13','ean_8','itf','upc_a','upc_e']}) : null;
+    const hasBarcodeDetector = 'BarcodeDetector' in window;
+    let barcodeDetector = hasBarcodeDetector ? new BarcodeDetector({
+      formats: ['qr_code','aztec','data_matrix','pdf417','codabar','code_39','code_93','code_128','ean_13','ean_8','itf','upc_a','upc_e']
+    }) : null;
 
     // HTTPS Badge
     (function(){
       const isHttps = location.protocol === 'https:' || location.hostname === 'localhost';
       document.getElementById('httpsBadge').hidden = !isHttps;
     })();
+
+    function requireSecureContext(){
+      const ok = location.protocol === 'https:' || location.hostname === 'localhost';
+      if(!ok){
+        alert('需要在 HTTPS 或 localhost 環境下才能開啟相機。請改用 GitHub Pages / 本機 https 伺服器。');
+      }
+      return ok;
+    }
 
     // === 掃描迴圈 ===
     async function tick(){
@@ -110,8 +121,8 @@
 
       try {
         if(barcodeDetector){
-          const bitmap = await createImageBitmap(imageData);
-          const codes = await barcodeDetector.detect(bitmap);
+          // 直接餵 canvas 做為 ImageBitmapSource，避免 createImageBitmap 在部分 iOS 的相容性問題
+          const codes = await barcodeDetector.detect(canvas);
           if(codes && codes.length){
             for(const c of codes){ onCode(c.rawValue || c, c.format || 'unknown'); }
           }
@@ -126,6 +137,7 @@
 
     // === 開始/停止 ===
     async function start(deviceId){
+      if(!requireSecureContext()) return;
       stop();
       try{
         const constraints = {
@@ -137,8 +149,8 @@
         };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream; await video.play();
-        statusEl.textContent = '掃描中…';
-        listCameras();
+        statusEl.textContent = '掃描中…（若沒畫面，請確認是否允許相機權限）';
+        await listCameras();
         tick();
       }catch(err){ statusEl.textContent = '無法開啟相機：' + err.message; }
     }
@@ -179,8 +191,7 @@
         const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
         try{
           if(barcodeDetector){
-            const bitmap = await createImageBitmap(imageData);
-            const codes = await barcodeDetector.detect(bitmap);
+            const codes = await barcodeDetector.detect(canvas);
             if(codes.length){ for(const c of codes){ onCode(c.rawValue || c, c.format || 'unknown'); } }
             else { statusEl.textContent = '圖片中未偵測到條碼/QR。'; }
           } else if(window.jsQR){
@@ -194,15 +205,17 @@
 
     // === 鏡頭列表 ===
     async function listCameras(){
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const vids = devices.filter(d=>d.kind==='videoinput');
-      cameraSel.innerHTML = '';
-      vids.forEach((d,i)=>{
-        const opt = document.createElement('option');
-        opt.value = d.deviceId; opt.textContent = d.label || `鏡頭 ${i+1}`;
-        if(d.deviceId===currentDeviceId) opt.selected = true;
-        cameraSel.appendChild(opt);
-      });
+      try{
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const vids = devices.filter(d=>d.kind==='videoinput');
+        cameraSel.innerHTML = '';
+        vids.forEach((d,i)=>{
+          const opt = document.createElement('option');
+          opt.value = d.deviceId; opt.textContent = d.label || `鏡頭 ${i+1}`;
+          if(d.deviceId===currentDeviceId) opt.selected = true;
+          cameraSel.appendChild(opt);
+        });
+      }catch(e){ /* ignore */ }
     }
 
     cameraSel.addEventListener('change', async ()=>{
@@ -226,19 +239,18 @@
     function onCode(text, format){
       statusEl.innerHTML = `<span class='ok'>成功</span>：${escapeHtml(text)}`;
       const arr = loadLog();
-      // 去重（以內容與格式為 key）
-      const key = text + '|' + format;
+      const key = text + '|' + format; // 去重
       if(!arr.some(x=>x.text+'|'+x.format===key)){
         arr.push({ text, format, ts: Date.now() }); saveLog(arr); renderLog();
       }
     }
-    function escapeHtml(s){ return s.replace(/[&<>\"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+    function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
-    // 匯出 CSV
+    // 匯出 CSV（用 CRLF 以利 Excel 開啟）
     function exportCSV(){
       const arr = loadLog();
       const header = ['time','format','text'];
-      const rows = arr.map(x=>[new Date(x.ts).toISOString(), x.format, x.text.replace(/"/g,'""')]);
+      const rows = arr.map(x=>[new Date(x.ts).toISOString(), x.format, String(x.text).replace(/"/g,'""')]);
       const csv = [header, ...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('
 ');
       const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -249,12 +261,12 @@
     function clearLog(){ localStorage.removeItem('qrLog'); renderLog(); }
 
     // 綁定 UI 事件
-    startBtn.addEventListener('click', ()=> start());
-    stopBtn.addEventListener('click', stop);
-    torchBtn.addEventListener('click', toggleTorch);
-    snapBtn.addEventListener('click', snap);
-    exportBtn.addEventListener('click', exportCSV);
-    clearBtn.addEventListener('click', clearLog);
+    startBtn.addEventListener('click', async ()=>{ await start(); });
+    stopBtn.addEventListener('click', ()=>{ stop(); });
+    torchBtn.addEventListener('click', async ()=>{ await toggleTorch(); });
+    snapBtn.addEventListener('click', ()=>{ snap(); });
+    exportBtn.addEventListener('click', ()=>{ exportCSV(); });
+    clearBtn.addEventListener('click', ()=>{ clearLog(); });
 
     // 初始
     renderLog();
